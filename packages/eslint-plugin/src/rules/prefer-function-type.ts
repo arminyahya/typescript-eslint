@@ -1,6 +1,7 @@
 import {
   AST_NODE_TYPES,
   AST_TOKEN_TYPES,
+  TSESLint,
   TSESTree,
 } from '@typescript-eslint/experimental-utils';
 import * as util from '../util';
@@ -88,10 +89,6 @@ export default util.createRule({
         colonPos + 1,
       )}`;
 
-      const lastChar = suggestion.endsWith(';') ? ';' : '';
-      if (lastChar) {
-        suggestion = suggestion.slice(0, -1);
-      }
       if (shouldWrapSuggestion(parent.parent)) {
         suggestion = `(${suggestion})`;
       }
@@ -102,17 +99,16 @@ export default util.createRule({
             .slice(
               parent.id.range[0],
               parent.typeParameters.range[1],
-            )} = ${suggestion}${lastChar}`;
+            )} = ${suggestion}`;
         }
-        return `type ${parent.id.name} = ${suggestion}${lastChar}`;
+        return `type ${parent.id.name} = ${suggestion}`;
       }
-      return suggestion;
+      return suggestion.endsWith(';') ? suggestion.slice(0, -1) : suggestion;
     }
 
     /**
      * @param member The TypeElement being checked
      * @param node The parent of member being checked
-     * @param tsThisTypes
      */
     function checkMember(
       member: TSESTree.TypeElement,
@@ -140,17 +136,8 @@ export default util.createRule({
           });
           return;
         }
+        const comments = sourceCode.getCommentsBefore(member);
         const suggestion = renderSuggestion(member, node);
-        const fixStart =
-          node.type === AST_NODE_TYPES.TSTypeLiteral
-            ? node.range[0]
-            : sourceCode
-                .getTokens(node)
-                .filter(
-                  token =>
-                    token.type === AST_TOKEN_TYPES.Keyword &&
-                    token.value === 'interface',
-                )[0].range[0];
 
         context.report({
           node: member,
@@ -158,12 +145,26 @@ export default util.createRule({
           data: {
             literalOrInterface: phrases[node.type],
           },
-          fix(fixer) {
-            return fixer.replaceTextRange(
-              [fixStart, node.range[1]],
-              suggestion,
-            );
-          },
+          // Don't fix anything if there's a comment before token
+          fix: comments.length
+            ? null
+            : (fixer): TSESLint.RuleFix => {
+                const fixStart =
+                  node.type === AST_NODE_TYPES.TSTypeLiteral
+                    ? node.range[0]
+                    : sourceCode
+                        .getTokens(node)
+                        .filter(
+                          token =>
+                            token.type === AST_TOKEN_TYPES.Keyword &&
+                            token.value === 'interface',
+                        )[0].range[0];
+
+                return fixer.replaceTextRange(
+                  [fixStart, node.range[1]],
+                  suggestion,
+                );
+              },
         });
       }
     }
